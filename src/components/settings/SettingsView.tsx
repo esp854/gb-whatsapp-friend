@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Camera, User, Edit2, Check, Moon, Sun, Monitor } from "lucide-react";
+import { useState, useRef } from "react";
+import { Camera, Edit2, Check, Moon, Sun, Monitor, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,12 +7,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useProfile } from "@/hooks/useProfile";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useToast } from "@/hooks/use-toast";
+import { useFileUpload } from "@/hooks/useFileUpload";
 import { Label } from "@/components/ui/label";
 
 export function SettingsView() {
   const { profile, updateProfile } = useProfile();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
+  const { uploadAvatar, uploading } = useFileUpload();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState(profile?.display_name || "");
@@ -35,6 +38,54 @@ export function SettingsView() {
       setEditingField(null);
     }
     setSaving(false);
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez sélectionner une image",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "Fichier trop volumineux",
+        description: "La taille maximale est de 5 Mo",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const { data, error } = await uploadAvatar(file);
+    
+    if (error) {
+      toast({
+        title: "Erreur",
+        description: "Impossible de télécharger l'image",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (data) {
+      const { error: updateError } = await updateProfile({ avatar_url: data.url });
+      
+      if (updateError) {
+        toast({
+          title: "Erreur",
+          description: "Impossible de mettre à jour l'avatar",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Avatar mis à jour !" });
+      }
+    }
   };
 
   const themes = [
@@ -65,8 +116,23 @@ export function SettingsView() {
                   {profile?.display_name?.charAt(0) || profile?.username?.charAt(0) || "?"}
                 </AvatarFallback>
               </Avatar>
-              <button className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                <Camera className="w-4 h-4 text-primary-foreground" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarChange}
+                className="hidden"
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {uploading ? (
+                  <Loader2 className="w-4 h-4 text-primary-foreground animate-spin" />
+                ) : (
+                  <Camera className="w-4 h-4 text-primary-foreground" />
+                )}
               </button>
             </div>
             <div>
