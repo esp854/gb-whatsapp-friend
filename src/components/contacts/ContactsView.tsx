@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { AddContactDialog } from "./AddContactDialog";
 import {
   Tabs,
   TabsContent,
@@ -43,12 +44,13 @@ export function ContactsView() {
   const [pendingReceived, setPendingReceived] = useState<Contact[]>([]);
   const [pendingSent, setPendingSent] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAddDialog, setShowAddDialog] = useState(false);
 
   const fetchContacts = async () => {
     if (!user) return;
 
-    // Fetch accepted contacts
-    const { data: accepted } = await supabase
+    // Fetch accepted contacts (both directions)
+    const { data: acceptedAsUser } = await supabase
       .from("contacts")
       .select(`
         *,
@@ -56,6 +58,24 @@ export function ContactsView() {
       `)
       .eq("user_id", user.id)
       .eq("status", "accepted");
+
+    const { data: acceptedAsContact } = await supabase
+      .from("contacts")
+      .select(`
+        *,
+        user_profile:profiles!contacts_user_id_fkey(id, username, display_name, avatar_url, is_online)
+      `)
+      .eq("contact_id", user.id)
+      .eq("status", "accepted");
+
+    // Merge both directions
+    const allAccepted = [
+      ...(acceptedAsUser || []),
+      ...(acceptedAsContact || []).map((c) => ({
+        ...c,
+        contact_profile: c.user_profile,
+      })),
+    ];
 
     // Fetch pending requests received
     const { data: received } = await supabase
@@ -77,7 +97,7 @@ export function ContactsView() {
       .eq("user_id", user.id)
       .eq("status", "pending");
 
-    setContacts(accepted || []);
+    setContacts(allAccepted);
     setPendingReceived(received || []);
     setPendingSent(sent || []);
     setLoading(false);
@@ -128,12 +148,23 @@ export function ContactsView() {
     return name.toLowerCase().includes(search.toLowerCase());
   });
 
+  // Get all existing contact IDs
+  const existingContactIds = [
+    ...contacts.map((c) => c.contact_profile?.id || c.contact_id),
+    ...pendingSent.map((c) => c.contact_id),
+    ...pendingReceived.map((c) => c.user_id),
+  ].filter(Boolean) as string[];
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-foreground">Contacts</h1>
-          <Button size="icon" variant="ghost">
+          <Button 
+            size="icon" 
+            variant="ghost"
+            onClick={() => setShowAddDialog(true)}
+          >
             <UserPlus className="w-5 h-5" />
           </Button>
         </div>
@@ -156,6 +187,9 @@ export function ContactsView() {
           <TabsTrigger value="pending" className="flex-1">
             En attente ({pendingReceived.length})
           </TabsTrigger>
+          <TabsTrigger value="sent" className="flex-1">
+            Envoyées ({pendingSent.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="flex-1 overflow-y-auto scrollbar-hide mt-0 p-4">
@@ -166,6 +200,13 @@ export function ContactsView() {
           ) : filteredContacts.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
               <p>Aucun contact</p>
+              <Button 
+                variant="link" 
+                onClick={() => setShowAddDialog(true)}
+                className="mt-2"
+              >
+                Ajouter des contacts
+              </Button>
             </div>
           ) : (
             <div className="space-y-1">
@@ -247,7 +288,55 @@ export function ContactsView() {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="sent" className="flex-1 overflow-y-auto scrollbar-hide mt-0 p-4">
+          {pendingSent.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">
+              <p>Aucune demande envoyée</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {pendingSent.map((request) => (
+                <div
+                  key={request.id}
+                  className="flex items-center gap-3 p-3 rounded-lg bg-secondary"
+                >
+                  <Avatar className="w-12 h-12">
+                    <AvatarImage src={request.contact_profile?.avatar_url || undefined} />
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      {request.contact_profile?.display_name?.charAt(0) || "?"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <p className="font-semibold text-foreground">
+                      {request.contact_profile?.display_name || request.contact_profile?.username}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      En attente de réponse
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive"
+                    onClick={() => handleReject(request.id)}
+                  >
+                    Annuler
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
+
+      {/* Add Contact Dialog */}
+      <AddContactDialog
+        open={showAddDialog}
+        onClose={() => setShowAddDialog(false)}
+        onAdded={fetchContacts}
+        existingContactIds={existingContactIds}
+      />
     </div>
   );
 }
